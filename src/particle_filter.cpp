@@ -16,15 +16,39 @@
 #include <iterator>
 
 #include "particle_filter.h"
-
+#include <cmath>
 using namespace std;
+//random engine
+static default_random_engine gen;
 
 void ParticleFilter::init(double x, double y, double theta, double std[]) {
-	// TODO: Set the number of particles. Initialize all particles to first position (based on estimates of 
-	//   x, y, theta and their uncertainties from GPS) and all weights to 1. 
-	// Add random Gaussian noise to each particle.
-	// NOTE: Consult particle_filter.h for more information about this method (and others in this file).
 
+
+    // number of particles
+	num_particles=150;
+	// noise for initial parameters
+	normal_distribution<double> dist_x(0, std[0]);
+	normal_distribution<double> dist_y(0, std[1]);
+	normal_distribution<double> dist_theta(0, std[2]);
+	//intialising weights and particles
+	weights = vector<double>(num_particles);
+	particles = vector<Particle>(num_particles);
+
+    for(int i=0; i<num_particles; i++)
+    {
+    	Particle p;
+        p.id = i;
+        p.x = x + dist_x(gen);
+        p.y = y + dist_y(gen);
+        p.theta = theta + dist_theta(gen);
+        p.weight = 1.0;
+        particles[i] = p;
+
+    }
+
+
+
+	is_initialized=true;
 }
 
 void ParticleFilter::prediction(double delta_t, double std_pos[], double velocity, double yaw_rate) {
@@ -33,13 +57,62 @@ void ParticleFilter::prediction(double delta_t, double std_pos[], double velocit
 	//  http://en.cppreference.com/w/cpp/numeric/random/normal_distribution
 	//  http://www.cplusplus.com/reference/random/default_random_engine/
 
-}
+	double vy=0;
+	if(fabs(yaw_rate) > 0.001)
+	{
+	  vy = velocity/yaw_rate;
+	}
+	double ydt = delta_t * yaw_rate;
+	double vdt = delta_t * velocity;
+	normal_distribution<double> noise_x(0, std_pos[0]);
+    normal_distribution<double> noise_y(0, std_pos[1]);
+	normal_distribution<double> noise_theta(0, std_pos[2]);
+	for(int i=0; i<num_particles; i++)
+	  {
 
+		Particle p = particles[i];
+			// predict x,y for t+1
+			if(fabs(yaw_rate) > 0.001) {
+				p.x += vy * (sin(p.theta + ydt) - sin(p.theta));
+				p.y += vy * (cos(p.theta) - cos(p.theta + ydt));
+			} else {
+				p.x += vdt * cos(p.theta);
+				p.y += vdt * sin(p.theta);
+			}
+			p.theta += ydt;
+
+           // adding noise parameters
+			p.x += noise_x(gen);
+			p.y +=  noise_y(gen);
+			p.theta += noise_theta(gen);
+
+
+
+}
+}
 void ParticleFilter::dataAssociation(std::vector<LandmarkObs> predicted, std::vector<LandmarkObs>& observations) {
 	// TODO: Find the predicted measurement that is closest to each observed measurement and assign the 
 	//   observed measurement to this particular landmark.
 	// NOTE: this method will NOT be called by the grading code. But you will probably find it useful to 
 	//   implement this method and use it as a helper during the updateWeights phase.
+
+
+	for(int i=0; i<observations.size(); i++)
+		{
+		double min_dist = numeric_limits<double>::max();
+		LandmarkObs prediction = predicted[i];
+		for(int j=0; j<<predicted.size(); j++)
+		  {
+			  double dist=sqrt(pow((prediction.x-observations[i].x),2)+pow((prediction.y-observations[i].y),2));
+					  if(dist<min_dist)
+					  {
+						 min_dist=dist;
+						 observations[i].id=j;
+					  }
+		  }
+		}
+
+
 
 }
 
@@ -55,12 +128,109 @@ void ParticleFilter::updateWeights(double sensor_range, double std_landmark[],
 	//   and the following is a good resource for the actual equation to implement (look at equation 
 	//   3.33
 	//   http://planning.cs.uiuc.edu/node99.html
+
+
+
+	for(int i=0; i<num_particles; i++)
+	{
+			Particle p = particles[i];
+			//step1 : Translating local coordinates to map coordinates
+			std::vector<LandmarkObs> observations_map;
+			for(int j=0; j<observations.size(); j++)
+			         {
+						LandmarkObs observation_transformed;
+						//translation plus rotation
+						observation_transformed.x = observations[j].x * cos(p.theta) - observations[j].y * sin(p.theta) + p.x;
+						observation_transformed.y = observations[j].x * sin(p.theta) + observations[j].y * cos(p.theta) + p.y;
+						//appending this observation
+						observations_map.push_back(observation_transformed);
+					}
+
+			//collecting all the landmarks within the range of the sensor
+			std::vector<LandmarkObs> predicted_landmarks;
+			for (int k=0; k<map_landmarks.landmark_list.size(); k++)
+			{
+						Map::single_landmark_s landmark = map_landmarks.landmark_list[k];
+						double distance=sqrt(pow((p.x-landmark.x_f),2)+pow((p.y-landmark.y_f),2));
+
+				if(distance < sensor_range)
+						{
+							LandmarkObs prediction;
+							prediction.id = landmark.id_i;
+							prediction.x = landmark.x_f;
+							prediction.y = landmark.y_f;
+							predicted_landmarks.push_back(prediction);
+
+						}
+					}
+
+			// step 2: Choosing closest landmark
+			dataAssociation(predicted_landmarks,observations_map);
+
+			//step3 :Calculating probability for each observation and multpliying them to find total probability
+			
+			double denominator = 2*M_PI*std_landmark[0]*std_landmark[1];
+		double x_deno= 2*pow(std_landmark[0],2);
+		double y_deno= 2*pow(std_landmark[1],2);
+		for(int l=0;l<observations_map.size();l++)
+			{
+				LandmarkObs obs = observations_map[l];
+                LandmarkObs mu = predicted_landmarks[obs.id];
+				double x_diff=obs.x-mu.x;
+				double y_diff=obs.y-mu.y;
+
+				p.weight *= exp(-pow(x_diff,2)/x_deno - pow(y_diff,2)/y_deno ) / denominator;
+
+			}
+
+		weights[i]=p.weight;
+
+	}
+
+
+
 }
 
 void ParticleFilter::resample() {
 	// TODO: Resample particles with replacement with probability proportional to their weight. 
 	// NOTE: You may find std::discrete_distribution helpful here.
 	//   http://en.cppreference.com/w/cpp/numeric/random/discrete_distribution
+
+	//implementing resampling wheel
+	//new particles
+	vector<Particle> new_particles(particles.size());
+	 //current weights
+	 vector<double> weights;
+	  for (int i = 0; i < num_particles; i++)
+	  {
+	    weights.push_back(particles[i].weight);
+	  }
+	//choosing random index
+
+	    uniform_int_distribution<int> uniintdist(0, num_particles-1);
+	    int index = uniintdist(gen);
+
+	    // maximum weight
+	      double max_weight = *max_element(weights.begin(), weights.end());
+
+	      // uniform random distribution [0.0, max_weight)
+	      uniform_real_distribution<double> unirealdist(0.0, 1.0);
+
+	      double beta = 0.0;
+
+	      // resampling wheel
+	      for (int i = 0; i < num_particles; i++) {
+	        beta += unirealdist(gen) * 2.0*max_weight;
+
+	      while (weights[index]< beta)
+	        {
+	          beta -= weights[index];
+	          index = (index + 1) % num_particles;
+	        }
+	        new_particles.push_back(particles[index]);
+	      }
+
+	      particles = new_particles;
 
 }
 
