@@ -192,15 +192,16 @@ void ParticleFilter::updateWeights(double sensor_range, double std_landmark[],
 }
 
 void ParticleFilter::resample() {
-	
+	// TODO: Resample particles with replacement with probability proportional to their weight. 
 	// NOTE: You may find std::discrete_distribution helpful here.
 	//   http://en.cppreference.com/w/cpp/numeric/random/discrete_distribution
 
 	//implementing resampling wheel
 	//new particles
-	vector<Particle> new_particles(particles.size());
-	 //current weights
-	 vector<double> weights;
+
+	new_particles = vector<Particle>(num_particles);
+	weights = vector<double>(num_particles);
+
 	  for (int i = 0; i < num_particles; i++)
 	  {
 	    weights.push_back(particles[i].weight);
@@ -213,7 +214,7 @@ void ParticleFilter::resample() {
 	    // maximum weight
 	      double max_weight = *max_element(weights.begin(), weights.end());
 
-	      // uniform random distribution [0.0, max_weight)
+
 	      uniform_real_distribution<double> unirealdist(0.0, 1.0);
 
 	      double beta = 0.0;
